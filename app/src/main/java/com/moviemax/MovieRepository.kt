@@ -16,6 +16,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipInputStream
 
 const val APP_VERSION = "1.0-mobile"
 
@@ -33,7 +34,7 @@ val SERVER_LIST = listOf(
 )
 
 const val DB_URL =
-    "https://github.com/alamin-sarkar/test/raw/refs/heads/main/test/movie_database.db"
+    "https://github.com/alamin-sarkar/test/raw/refs/heads/main/test/movie_database.zip"
 const val DB_VERSION_URL =
     "https://raw.githubusercontent.com/alamin-sarkar/test/refs/heads/main/test/db_version.txt"
 
@@ -121,16 +122,19 @@ class MovieRepository(private val app: Application) {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         var lastError: Exception? = null
         val tempFile = File(dbFile.parentFile, "${dbFile.name}.tmp")
+        val tempZip = File(dbFile.parentFile, "${dbFile.name}.tmp.zip")
         repeat(3) { attempt ->
             try {
                 if (tempFile.exists()) tempFile.delete()
+                if (tempZip.exists()) tempZip.delete()
                 val request = Request.Builder().url(url).get().build()
                 downloadClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
                     val body = response.body ?: throw IOException("Empty response body")
                     val total = body.contentLength()
                     dbFile.parentFile?.mkdirs()
-                    FileOutputStream(tempFile).use { out ->
+                    val downloadTarget = if (url.lowercase().endsWith(".zip")) tempZip else tempFile
+                    FileOutputStream(downloadTarget).use { out ->
                         body.byteStream().use { input ->
                             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                             var read: Int
@@ -145,6 +149,9 @@ class MovieRepository(private val app: Application) {
                         }
                     }
                 }
+                if (url.lowercase().endsWith(".zip")) {
+                    unzipDb(tempZip, tempFile)
+                }
                 if (!isValidSqlite(tempFile)) {
                     tempFile.delete()
                     throw IOException("Downloaded DB is not valid")
@@ -154,10 +161,12 @@ class MovieRepository(private val app: Application) {
                     tempFile.copyTo(dbFile, overwrite = true)
                     tempFile.delete()
                 }
+                if (tempZip.exists()) tempZip.delete()
                 return@withContext Result.success(Unit)
             } catch (e: Exception) {
                 lastError = e
                 tempFile.delete()
+                tempZip.delete()
                 dbFile.delete()
                 if (attempt < 2) {
                     delay(1500L * (attempt + 1))
@@ -165,6 +174,28 @@ class MovieRepository(private val app: Application) {
             }
         }
         Result.failure(lastError ?: IOException("Download failed"))
+    }
+
+    private fun unzipDb(zipFile: File, outFile: File) {
+        if (!zipFile.exists()) throw IOException("Zip file missing")
+        ZipInputStream(zipFile.inputStream()).use { zis ->
+            var entry = zis.nextEntry
+            var extracted = false
+            while (entry != null) {
+                val name = entry.name.lowercase()
+                if (!entry.isDirectory && (name.endsWith(".db") || name.contains("movie_database"))) {
+                    outFile.outputStream().use { out ->
+                        zis.copyTo(out)
+                    }
+                    extracted = true
+                    break
+                }
+                entry = zis.nextEntry
+            }
+            if (!extracted) {
+                throw IOException("DB file not found in zip")
+            }
+        }
     }
 
     private fun isValidSqlite(file: File): Boolean {
