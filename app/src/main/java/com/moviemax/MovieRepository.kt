@@ -38,7 +38,13 @@ const val DB_URL =
 const val DB_VERSION_URL =
     "https://raw.githubusercontent.com/alamin-sarkar/test/refs/heads/main/test/db_version.txt"
 
-data class MovieResult(val title: String, val link: String, val score: Int)
+data class MovieResult(
+    val title: String,
+    val link: String,
+    val score: Int,
+    val posterLink: String?,
+    val baseName: String
+)
 
 @Serializable
 data class HistoryEntry(
@@ -47,6 +53,7 @@ data class HistoryEntry(
     val position: Long,
     val duration: Long,
     val lastPlayedTs: Long,
+    val posterLink: String? = null,
     val audioLabel: String? = null,
     val audioLanguage: String? = null,
     val audioGroupIndex: Int? = null,
@@ -240,21 +247,23 @@ class MovieRepository(private val app: Application) {
         try {
             val cursor = if (year != null) {
                 db.rawQuery(
-                    "SELECT name, full_name, year, link FROM Movies WHERE year = ?",
+                    "SELECT name, full_name, year, link, poster_link FROM Movies WHERE year = ?",
                     arrayOf(year)
                 )
             } else {
-                db.rawQuery("SELECT name, full_name, year, link FROM Movies", null)
+                db.rawQuery("SELECT name, full_name, year, link, poster_link FROM Movies", null)
             }
             cursor.use {
                 val nameIndex = cursor.getColumnIndex("name")
                 val fullNameIndex = cursor.getColumnIndex("full_name")
                 val linkIndex = cursor.getColumnIndex("link")
+                val posterIndex = cursor.getColumnIndex("poster_link")
 
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(nameIndex) ?: continue
                     val fullName = cursor.getString(fullNameIndex)
                     val link = cursor.getString(linkIndex) ?: continue
+                    val poster = if (posterIndex >= 0) cursor.getString(posterIndex) else null
                     if (link.isBlank()) continue
 
                     val movieName = name.lowercase().trim()
@@ -270,7 +279,15 @@ class MovieRepository(private val app: Application) {
                     if (score > 0 && isValidLink(availableServers, link)) {
                         var title = (fullName ?: name).trim()
                         if (title.length > 55) title = title.take(55) + "..."
-                        matched.add(MovieResult(title = title, link = link, score = score))
+                        matched.add(
+                            MovieResult(
+                                title = title,
+                                link = link,
+                                score = score,
+                                posterLink = poster,
+                                baseName = name
+                            )
+                        )
                     }
                 }
             }

@@ -38,6 +38,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -81,12 +83,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
+import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -169,8 +177,8 @@ class MainActivity : ComponentActivity() {
                             onYearChange = viewModel::onYearChange,
                             onSearch = viewModel::startSearch,
                             onTabSelected = viewModel::onTabSelected,
-                            onResultClick = { viewModel.openResult(it.link, it.title) },
-                            onHistoryClick = { viewModel.openHistory(it.link, it.title) },
+                            onResultClick = { viewModel.openResult(it.link, it.title, it.posterLink) },
+                            onHistoryClick = { viewModel.openHistory(it.link, it.title, it.posterLink) },
                             onMenuClick = { drawerScope.launch { drawerState.open() } },
                             onClearHistory = viewModel::clearHistory,
                             onRemoveHistoryItem = viewModel::removeHistoryItem
@@ -486,7 +494,7 @@ fun AppDrawer(appVersion: String, dbVersion: String?) {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 300.dp)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -618,19 +626,14 @@ fun HistoryList(
 
 @Composable
 fun ResultRow(item: ResultItem, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF121A24)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Text(
-            text = item.title,
-            color = Color(0xFFE7ECF2),
-            modifier = Modifier.padding(12.dp)
-        )
-    }
+    MoviePosterCard(
+        title = item.title,
+        info = null,
+        isAvailable = null,
+        posterUrl = item.posterLink,
+        onClick = onClick,
+        onLongPress = null
+    )
 }
 
 @Composable
@@ -641,44 +644,211 @@ fun HistoryRow(
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF121A24)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress
-            )
+    MoviePosterCard(
+        title = item.title,
+        info = item.info,
+        isAvailable = isAvailable,
+        posterUrl = item.posterLink,
+        onClick = onClick,
+        onLongPress = onLongPress
+    )
+}
+
+@Composable
+fun PosterThumb(posterUrl: String?, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val request = ImageRequest.Builder(context)
+        .data(posterUrl)
+        .crossfade(true)
+        .build()
+
+    SubcomposeAsyncImage(
+        model = request,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1C2432))
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    color = Color(0xFFE7ECF2),
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(
-                                if (isAvailable) Color(0xFF45D483) else Color(0xFFFF5E5E),
-                                shape = RoundedCornerShape(50)
-                            )
+        when (painter.state) {
+            is AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
+            is AsyncImagePainter.State.Loading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1C2432)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFFF2C14E),
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = item.info,
-                        color = Color(0xFF9AA6B2),
-                        fontSize = 12.sp
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1C2432)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color(0xFF8A97A6)
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+fun MoviePosterCard(
+    title: String,
+    info: String?,
+    isAvailable: Boolean?,
+    posterUrl: String?,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?
+) {
+    val modifier = if (onLongPress != null) {
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    }
+
+    val qualityBadge = remember(title) { extractQualityBadge(title) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF121A24)),
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier
+            .height(150.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(posterUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                when (painter.state) {
+                    is AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
+                    is AsyncImagePainter.State.Loading -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1C2432)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFF2C14E),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    else -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1C2432)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color(0xFF8A97A6)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (qualityBadge != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF1B2A3B), Color(0xFF0F1622))
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = qualityBadge,
+                        color = Color(0xFFF2C14E),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color(0xCC0B0F14))
+                        )
+                    )
+                    .padding(10.dp)
+            ) {
+                Column {
+                    Text(
+                        text = title,
+                        color = Color(0xFFF2F4F7),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (!info.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isAvailable != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(
+                                            if (isAvailable) Color(0xFF45D483) else Color(0xFFFF5E5E),
+                                            shape = RoundedCornerShape(50)
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = info,
+                                color = Color(0xFFB6C2CF),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun extractQualityBadge(title: String): String? {
+    val text = title.lowercase()
+    return when {
+        text.contains("480p") || text.contains("sd") -> "SD"
+        text.contains("2160p") || text.contains("4k") -> "UHD"
+        text.contains("1080p") || text.contains("fhd") -> "FHD"
+        text.contains("720p") || text.contains("hd") -> "HD"
+        else -> null
     }
 }

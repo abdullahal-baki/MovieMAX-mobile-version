@@ -16,8 +16,8 @@ import java.util.Locale
 
 enum class MainTab { Results, History }
 
-data class ResultItem(val title: String, val link: String)
-data class HistoryItem(val title: String, val info: String, val link: String)
+data class ResultItem(val title: String, val link: String, val posterLink: String?)
+data class HistoryItem(val title: String, val info: String, val link: String, val posterLink: String?)
 
 data class UiState(
     val query: String = "",
@@ -96,7 +96,19 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch(Dispatchers.IO) {
             val results = repo.matchMovies(availableServers, query, year)
-            val items = results.map { ResultItem(it.title, it.link) }
+            val posterByBase = mutableMapOf<String, String>()
+            results.forEach { result ->
+                val key = result.baseName.trim().lowercase()
+                val poster = result.posterLink?.takeIf { it.isNotBlank() }
+                if (poster != null) {
+                    posterByBase[key] = poster
+                }
+            }
+            val items = results.map { result ->
+                val key = result.baseName.trim().lowercase()
+                val poster = result.posterLink?.takeIf { it.isNotBlank() } ?: posterByBase[key]
+                ResultItem(result.title, result.link, poster)
+            }
             withContext(Dispatchers.Main) {
                 _uiState.update { it.copy(results = items) }
                 if (items.isEmpty()) setStatus("No results found.")
@@ -105,16 +117,16 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openResult(link: String, title: String) {
+    fun openResult(link: String, title: String, posterLink: String?) {
         if (link.isBlank()) return
-        openInternal(link, title)
+        openInternal(link, title, posterLink)
     }
 
-    fun openHistory(link: String, title: String) {
-        openInternal(link, title)
+    fun openHistory(link: String, title: String, posterLink: String?) {
+        openInternal(link, title, posterLink)
     }
 
-    fun openInternal(link: String, title: String) {
+    fun openInternal(link: String, title: String, posterLink: String?) {
         if (link.isBlank()) return
         val safeTitle = title.ifBlank { link }
         val entry = historyIndex[link]
@@ -123,7 +135,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             0L
         }
-        saveHistoryPlayback(link, safeTitle)
+        saveHistoryPlayback(link, safeTitle, posterLink)
         _uiState.update {
             it.copy(
                 playerLink = link,
@@ -244,7 +256,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         if (link.isBlank()) return
         val opened = repo.openExternal(link)
         if (opened) {
-            saveHistoryPlayback(link, title.ifBlank { link })
+            saveHistoryPlayback(link, title.ifBlank { link }, null)
             setStatus("Opened in external player.")
         } else {
             setStatus("Unable to open external player.")
@@ -351,13 +363,14 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.update { it.copy(dbVersion = version) }
     }
 
-    private fun saveHistoryPlayback(link: String, title: String) {
+    private fun saveHistoryPlayback(link: String, title: String, posterLink: String?) {
         val now = System.currentTimeMillis() / 1000
         val existing = historyIndex[link]
         val entry = if (existing != null) {
             existing.copy(
                 name = title.ifBlank { existing.name },
-                lastPlayedTs = now
+                lastPlayedTs = now,
+                posterLink = posterLink ?: existing.posterLink
             )
         } else {
             HistoryEntry(
@@ -365,7 +378,8 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
                 name = title,
                 position = 0,
                 duration = 0,
-                lastPlayedTs = now
+                lastPlayedTs = now,
+                posterLink = posterLink
             )
         }
         historyIndex[link] = entry
@@ -385,7 +399,8 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
             HistoryItem(
                 title = entry.name,
                 info = label,
-                link = entry.link
+                link = entry.link,
+                posterLink = entry.posterLink
             )
         }
     }
