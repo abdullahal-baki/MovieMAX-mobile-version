@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MovieMax" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.MovieMax.Alert</item>
+    </style>
+
+    <style name="ThemeOverlay.MovieMax.Alert" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorSurface">#0B0F14</item>
+        <item name="colorOnSurface">#E7ECF2</item>
+        <item name="colorPrimary">#F2C14E</item>
+        <item name="colorSecondary">#74C69D</item>
+        <item name="colorControlActivated">#F2C14E</item>
+        <item name="colorControlNormal">#B5BEC9</item>
+        <item name="android:textColorPrimary">#E7ECF2</item>
+        <item name="android:textColorSecondary">#B5BEC9</item>
+    </style>
+</resources>

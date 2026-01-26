@@ -1,0 +1,45 @@
+__pycache__/db_loader.cpython-312.pyc
+__pycache__/
+notes.txt
+dist/
+build/
+BDIX
+__pycache__/db.cpython-312.pyc
+__pycache__/db.cpython-312.pyc
+*.spec
+*.pyc
+venv
+dist_installer/
+
+
+# Gradle
+.gradle/
+build/
+**/*.build/
+
+# Local config
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Android artifacts
+*.apk
+*.ap_
+*.aab
+*.dex
+
+# NDK / CMake
+.externalNativeBuild/
+.cxx/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
