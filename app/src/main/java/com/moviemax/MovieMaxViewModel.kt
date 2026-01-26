@@ -29,6 +29,9 @@ data class UiState(
     val dbVersion: String? = null,
     val availableServers: Set<String> = emptySet(),
     val results: List<ResultItem> = emptyList(),
+    val aiResults: List<ResultItem> = emptyList(),
+    val aiRefreshing: Boolean = false,
+    val aiStatus: String = "",
     val history: List<HistoryItem> = emptyList(),
     val selectedTab: MainTab = MainTab.History,
     val dbReady: Boolean = false,
@@ -49,6 +52,7 @@ data class UiState(
 
 class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = MovieRepository(app)
+    private val aiRecommender = AiRecommender(BuildConfig.GEMINI_API_KEY)
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -56,6 +60,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
     private var historyIndex: MutableMap<String, HistoryEntry> = mutableMapOf()
     private var statusJob: Job? = null
     private var historySaveJob: Job? = null
+    private var aiRefreshJob: Job? = null
 
     init {
         loadHistory()
@@ -202,6 +207,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
             delay(1500)
             repo.saveHistory(history)
         }
+        scheduleAiRefresh()
     }
 
     fun updateTrackSelection(
@@ -250,6 +256,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
             delay(1500)
             repo.saveHistory(history)
         }
+        scheduleAiRefresh()
     }
 
     fun openExternal(link: String, title: String) {
@@ -266,7 +273,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
     fun clearHistory() {
         historyIndex.clear()
         repo.saveHistory(emptyList())
-        _uiState.update { it.copy(history = emptyList()) }
+        _uiState.update { it.copy(history = emptyList(), aiResults = emptyList(), aiStatus = "") }
         setStatus("History cleared.")
     }
 
@@ -277,6 +284,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         repo.saveHistory(history)
         _uiState.update { it.copy(history = renderHistory(history)) }
         setStatus("History item removed.")
+        scheduleAiRefresh()
     }
 
     private fun ensureDb() {
@@ -292,6 +300,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     _uiState.update { it.copy(dbReady = true) }
                     refreshDbVersion()
+                    scheduleAiRefresh()
                     setStatus("Database ready.")
                 } else {
                     setStatus("DB download failed: ${result.exceptionOrNull()?.message ?: "Unknown error"}")
@@ -316,6 +325,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
                     repo.saveLocalDbVersion(remoteVersion)
                     _uiState.update { it.copy(dbReady = true) }
                     refreshDbVersion()
+                    scheduleAiRefresh()
                     setStatus("Database updated.")
                 } else {
                     setStatus("DB update failed: ${result.exceptionOrNull()?.message ?: "Unknown error"}")
@@ -323,6 +333,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 _uiState.update { it.copy(dbReady = true) }
                 refreshDbVersion()
+                scheduleAiRefresh()
                 setStatus("Database ready.")
             }
         }
@@ -349,6 +360,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
                     availableServers = available.toSet()
                 )
             }
+            scheduleAiRefresh()
         }
     }
 
@@ -356,6 +368,7 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
         val history = repo.loadHistory()
         historyIndex = history.associateBy { it.link }.toMutableMap()
         _uiState.update { it.copy(history = renderHistory(history)) }
+        scheduleAiRefresh()
     }
 
     private fun refreshDbVersion() {
@@ -470,5 +483,147 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    fun refreshAiNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(aiRefreshing = true) }
+            refreshAiRecommendations()
+            _uiState.update { it.copy(aiRefreshing = false) }
+        }
+    }
+
+    private fun scheduleAiRefresh() {
+        aiRefreshJob?.cancel()
+        aiRefreshJob = viewModelScope.launch {
+            delay(1200)
+            refreshAiRecommendations()
+        }
+    }
+
+    private suspend fun refreshAiRecommendations() {
+        val state = _uiState.value
+        if (!state.dbReady) {
+            _uiState.update { it.copy(aiStatus = "Database not ready.") }
+            return
+        }
+        if (availableServers.isEmpty()) {
+            _uiState.update { it.copy(aiStatus = "No connected servers yet.") }
+            return
+        }
+        val historyTitles = historyIndex.values
+            .sortedByDescending { it.lastPlayedTs }
+            .map { it.name }
+            .filter { it.isNotBlank() }
+            .take(20)
+
+        if (historyTitles.isEmpty()) {
+            _uiState.update { it.copy(aiResults = emptyList(), aiStatus = "Watch some movies to get AI recommendations.") }
+            return
+        }
+
+        _uiState.update { it.copy(aiStatus = "AI analyzing your watch history...") }
+        val aiResult = aiRecommender.recommendTitles(historyTitles)
+        val aiList = aiResult.getOrNull().orEmpty()
+        if (aiResult.isFailure) {
+            val err = aiResult.exceptionOrNull()?.message?.take(160) ?: "Unknown error"
+            _uiState.update {
+                it.copy(
+                    aiResults = emptyList(),
+                    aiStatus = "AI failed: $err"
+                )
+            }
+            return
+        }
+        if (aiList.isEmpty()) {
+            _uiState.update { it.copy(aiResults = emptyList(), aiStatus = "No AI suggestions found.") }
+            return
+        }
+
+        val picked = mutableListOf<ResultItem>()
+        val seenLinks = mutableSetOf<String>()
+        val globalCandidates = mutableListOf<MovieResult>()
+        for (raw in aiList.take(50)) {
+            val variants = buildQueryVariants(raw)
+            var usedQuery: String? = null
+            val candidates = mutableListOf<MovieResult>()
+            for (query in variants) {
+                val matches = repo.matchMovies(availableServers, query, null)
+                if (matches.isEmpty()) continue
+                usedQuery = query
+                candidates.addAll(matches)
+                break
+            }
+            if (candidates.isEmpty()) {
+                val tokens = raw.split(Regex("\\s+")).filter { it.length >= 3 }.take(3)
+                for (token in tokens) {
+                    val matches = repo.matchMovies(availableServers, token, null)
+                    if (matches.isEmpty()) continue
+                    usedQuery = token
+                    candidates.addAll(matches)
+                    break
+                }
+            }
+            if (candidates.isNotEmpty()) {
+                val q = usedQuery?.lowercase().orEmpty()
+                val sorted = candidates
+                    .distinctBy { it.link }
+                    .sortedWith(
+                        compareByDescending<MovieResult> { !it.posterLink.isNullOrBlank() }
+                            .thenByDescending { it.title.lowercase().contains(q) }
+                            .thenByDescending { it.score }
+                            .thenByDescending { it.year ?: 0 }
+                    )
+                for (candidate in sorted) {
+                    if (seenLinks.add(candidate.link)) {
+                        picked.add(ResultItem(candidate.title, candidate.link, candidate.posterLink))
+                        if (picked.size >= 20) break
+                    }
+                }
+                globalCandidates.addAll(sorted)
+            }
+            if (picked.size >= 20) break
+        }
+        if (picked.size < 20 && globalCandidates.isNotEmpty()) {
+            val fallback = globalCandidates
+                .distinctBy { it.link }
+                .sortedWith(
+                    compareByDescending<MovieResult> { !it.posterLink.isNullOrBlank() }
+                        .thenByDescending { it.score }
+                        .thenByDescending { it.year ?: 0 }
+                )
+            for (candidate in fallback) {
+                if (seenLinks.add(candidate.link)) {
+                    picked.add(ResultItem(candidate.title, candidate.link, candidate.posterLink))
+                    if (picked.size >= 20) break
+                }
+            }
+        }
+        _uiState.update {
+            it.copy(
+                aiResults = picked,
+                aiStatus = if (picked.isEmpty()) {
+                    "No matches found in database."
+                } else {
+                    "AI recommendations ready (${picked.size}/20)."
+                }
+            )
+        }
+    }
+
+    private fun buildQueryVariants(raw: String): List<String> {
+        val base = raw.trim()
+        if (base.isBlank()) return emptyList()
+        val noYear = base.replace(Regex("\\(\\d{4}\\)"), " ").trim()
+        val noQuality = noYear.replace(
+            Regex("(?i)\\b(480p|720p|1080p|2160p|4k|fhd|uhd|hd|sd|bluray|brrip|hdrip|web[- ]?dl|webrip)\\b"),
+            " "
+        ).trim()
+        val noPunct = noQuality.replace(Regex("[^a-zA-Z0-9 ]"), " ").trim()
+        val compact = noPunct.replace(Regex("\\s+"), " ").trim()
+        return listOf(base, noYear, noQuality, compact)
+            .map { it.trim() }
+            .filter { it.length >= 2 }
+            .distinct()
     }
 }

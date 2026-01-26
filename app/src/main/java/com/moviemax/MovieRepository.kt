@@ -43,7 +43,8 @@ data class MovieResult(
     val link: String,
     val score: Int,
     val posterLink: String?,
-    val baseName: String
+    val baseName: String,
+    val year: Int?
 )
 
 @Serializable
@@ -257,6 +258,7 @@ class MovieRepository(private val app: Application) {
                 val nameIndex = cursor.getColumnIndex("name")
                 val fullNameIndex = cursor.getColumnIndex("full_name")
                 val linkIndex = cursor.getColumnIndex("link")
+                val yearIndex = cursor.getColumnIndex("year")
                 val posterIndex = cursor.getColumnIndex("poster_link")
 
                 while (cursor.moveToNext()) {
@@ -264,6 +266,11 @@ class MovieRepository(private val app: Application) {
                     val fullName = cursor.getString(fullNameIndex)
                     val link = cursor.getString(linkIndex) ?: continue
                     val poster = if (posterIndex >= 0) cursor.getString(posterIndex) else null
+                    val yearValue = if (yearIndex >= 0) {
+                        cursor.getString(yearIndex)?.toIntOrNull()
+                    } else {
+                        null
+                    }
                     if (link.isBlank()) continue
 
                     val movieName = name.lowercase().trim()
@@ -285,7 +292,8 @@ class MovieRepository(private val app: Application) {
                                 link = link,
                                 score = score,
                                 posterLink = poster,
-                                baseName = name
+                                baseName = name,
+                                year = yearValue
                             )
                         )
                     }

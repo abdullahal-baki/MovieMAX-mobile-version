@@ -1,3 +1,8 @@
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.material.ExperimentalMaterialApi::class
+)
+
 package com.moviemax
 
 import android.os.Bundle
@@ -57,6 +62,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -181,7 +189,8 @@ class MainActivity : ComponentActivity() {
                             onHistoryClick = { viewModel.openHistory(it.link, it.title, it.posterLink) },
                             onMenuClick = { drawerScope.launch { drawerState.open() } },
                             onClearHistory = viewModel::clearHistory,
-                            onRemoveHistoryItem = viewModel::removeHistoryItem
+                            onRemoveHistoryItem = viewModel::removeHistoryItem,
+                            onRefreshAi = viewModel::refreshAiNow
                         )
                     }
                 }
@@ -221,7 +230,8 @@ fun MovieMaxScreen(
     onHistoryClick: (HistoryItem) -> Unit,
     onMenuClick: () -> Unit,
     onClearHistory: () -> Unit,
-    onRemoveHistoryItem: (String) -> Unit
+    onRemoveHistoryItem: (String) -> Unit,
+    onRefreshAi: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -391,7 +401,56 @@ fun MovieMaxScreen(
                     }
             ) {
                 when (state.selectedTab) {
-                    MainTab.Results -> ResultList(state.results, onResultClick)
+                    MainTab.Results -> {
+                        val showAi = state.results.isEmpty() && state.aiResults.isNotEmpty()
+                        val showAiHint = state.results.isEmpty() && state.aiResults.isEmpty() && state.history.isEmpty()
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (showAi) {
+                                Text(
+                                    text = "AI recommended movies",
+                                    color = Color(0xFF7EE8C3),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (showAiHint) {
+                                Text(
+                                    text = "Watch some movies to get AI recommendations.",
+                                    color = Color(0xFF9AA6B2),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (state.results.isEmpty() && state.aiStatus.isNotBlank()) {
+                                Text(
+                                    text = state.aiStatus,
+                                    color = Color(0xFF9AA6B2),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            val canPull = state.results.isEmpty()
+                            val pullState = rememberPullRefreshState(
+                                refreshing = state.aiRefreshing,
+                                onRefresh = onRefreshAi
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .then(if (canPull) Modifier.pullRefresh(pullState) else Modifier)
+                            ) {
+                                ResultList(
+                                    items = if (showAi) state.aiResults else state.results,
+                                    onItemClick = onResultClick
+                                )
+                                if (canPull) {
+                                    PullRefreshIndicator(
+                                        refreshing = state.aiRefreshing,
+                                        state = pullState,
+                                        modifier = Modifier.align(Alignment.TopCenter),
+                                        contentColor = Color(0xFFF2C14E)
+                                    )
+                                }
+                            }
+                        }
+                    }
                     MainTab.History -> {
                         Box(modifier = Modifier.fillMaxSize()) {
                             HistoryList(

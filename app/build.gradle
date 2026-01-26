@@ -4,6 +4,13 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.serialization'
 }
 
+def localProps = new Properties()
+def localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { localProps.load(it) }
+}
+def geminiKey = localProps.getProperty("GEMINI_API_KEY", "")
+
 android {
     namespace 'com.moviemax'
     compileSdk 34
@@ -14,6 +21,8 @@ android {
         targetSdk 34
         versionCode 1
         versionName '1.0'
+
+        buildConfigField "String", "GEMINI_API_KEY", "\"${geminiKey}\""
     }
 
     buildTypes {
@@ -26,6 +35,7 @@ android {
 
     buildFeatures {
         compose true
+        buildConfig true
     }
 
     composeOptions {
@@ -58,6 +68,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
 
     implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material'
     implementation 'androidx.compose.material:material-icons-extended'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.compose.ui:ui'
