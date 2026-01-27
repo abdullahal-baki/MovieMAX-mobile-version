@@ -34,11 +34,13 @@ class AiRecommender(private val apiKey: String) {
                 return@withContext Result.success(emptyList())
             }
 
+            val seed = System.currentTimeMillis()
             val prompt = buildString {
                 appendLine("User watched these movies:")
                 historyTitles.take(20).forEach { appendLine("- $it") }
                 appendLine()
                 appendLine("Recommend 60 movie titles based on this history.")
+                appendLine("Try to vary the list each time. Seed: $seed.")
                 appendLine("Return ONLY a JSON array of movie name strings, no extra text.")
                 appendLine("Example: [\"iron man\", \"the avengers\"]")
             }
@@ -65,7 +67,7 @@ class AiRecommender(private val apiKey: String) {
                         )
                     }
                 )
-                put("temperature", 0.6)
+                put("temperature", 0.8)
                 put("max_tokens", 800)
             }
 

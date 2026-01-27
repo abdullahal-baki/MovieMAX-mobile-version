@@ -279,6 +279,7 @@ fun MovieMaxScreen(
 
     var yearExpanded by remember { mutableStateOf(false) }
     var showContent by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { showContent = true }
 
     val backgroundBrush = Brush.verticalGradient(
@@ -391,11 +392,6 @@ fun MovieMaxScreen(
                     }
                 }
             }
-
-            Text(
-                text = "Tap a result to play",
-                color = Color(0xFF96A0AE)
-            )
 
             TabRow(selectedTabIndex = if (state.selectedTab == MainTab.Results) 0 else 1) {
                 Tab(
@@ -539,7 +535,7 @@ fun MovieMaxScreen(
                             )
                             if (state.history.isNotEmpty()) {
                                 ClearHistoryButton(
-                                    onClick = onClearHistory,
+                                    onClick = { showClearHistoryDialog = true },
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
                                         .padding(8.dp)
@@ -561,6 +557,29 @@ fun MovieMaxScreen(
                 color = Color(0xFF7EE8C3),
                 fontSize = 11.sp,
                 modifier = Modifier.height(18.dp)
+            )
+        }
+
+        if (showClearHistoryDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearHistoryDialog = false },
+                title = { Text("Clear all history?") },
+                text = { Text("This will remove all history items.", color = Color(0xFFE7ECF2)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onClearHistory()
+                            showClearHistoryDialog = false
+                        }
+                    ) {
+                        Text("Clear", color = Color(0xFFFF5E5E))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearHistoryDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }

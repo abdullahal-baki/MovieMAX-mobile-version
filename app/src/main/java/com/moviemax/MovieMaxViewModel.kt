@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.random.Random
 
 enum class MainTab { Results, History }
 
@@ -696,7 +697,8 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
 
         _uiState.update { it.copy(aiStatus = "AI analyzing your watch history...") }
         val aiResult = aiRecommender.recommendTitles(historyTitles)
-        val aiList = aiResult.getOrNull().orEmpty()
+        val seed = System.currentTimeMillis()
+        val aiList = aiResult.getOrNull().orEmpty().shuffled(Random(seed))
         if (aiResult.isFailure) {
             val err = aiResult.exceptionOrNull()?.message?.take(160) ?: "Unknown error"
             _uiState.update {
