@@ -28,7 +28,7 @@ class AiRecommender(private val apiKey: String) {
     suspend fun recommendTitles(historyTitles: List<String>): Result<List<String>> =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("Missing GEMINI_API_KEY"))
+                return@withContext Result.failure(IllegalStateException("Missing GROQ_API_KEY"))
             }
             if (historyTitles.isEmpty()) {
                 return@withContext Result.success(emptyList())
@@ -44,37 +44,39 @@ class AiRecommender(private val apiKey: String) {
             }
 
             val bodyJson = buildJsonObject {
+                put("model", "openai/gpt-oss-120b")
                 put(
-                    "contents",
+                    "messages",
                     buildJsonArray {
                         add(
                             buildJsonObject {
-                                put("role", "user")
+                                put("role", "system")
                                 put(
-                                    "parts",
-                                    buildJsonArray {
-                                        add(buildJsonObject { put("text", prompt) })
-                                    }
+                                    "content",
+                                    "You are a recommender. Return ONLY a JSON array of movie title strings, no extra text."
                                 )
+                            }
+                        )
+                        add(
+                            buildJsonObject {
+                                put("role", "user")
+                                put("content", prompt)
                             }
                         )
                     }
                 )
-                put(
-                    "generationConfig",
-                    buildJsonObject {
-                        put("temperature", 0.6)
-                        put("maxOutputTokens", 800)
-                        put("responseMimeType", "application/json")
-                    }
-                )
+                put("temperature", 0.6)
+                put("max_tokens", 800)
             }
 
-            val url =
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+            val url = "https://api.groq.com/openai/v1/chat/completions"
             val requestBody =
                 bodyJson.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder().url(url).post(requestBody).build()
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .post(requestBody)
+                .build()
 
             try {
                 client.newCall(request).execute().use { response ->
@@ -84,12 +86,10 @@ class AiRecommender(private val apiKey: String) {
                         throw IOException("HTTP ${response.code}: $snippet")
                     }
                     val root = json.parseToJsonElement(body) as? JsonObject ?: JsonObject(emptyMap())
-                    val candidates = root.getJsonArray("candidates")
-                    val candidateObj = (candidates?.firstOrNull() as? JsonObject)
-                    val contentObj = candidateObj?.getJsonObject("content")
-                    val parts = contentObj?.getJsonArray("parts")
-                    val partObj = (parts?.firstOrNull() as? JsonObject)
-                    val text = partObj?.getJsonPrimitive("text")?.content ?: ""
+                    val choices = root.getJsonArray("choices")
+                    val first = choices?.firstOrNull() as? JsonObject
+                    val message = first?.getJsonObject("message")
+                    val text = message?.getJsonPrimitive("content")?.content ?: ""
 
                     val cleaned = text
                         .removePrefix("```json")
@@ -99,6 +99,10 @@ class AiRecommender(private val apiKey: String) {
 
                     val parsed = runCatching { json.parseToJsonElement(cleaned) }.getOrNull()
                     val list = extractStringArray(parsed ?: JsonPrimitive(cleaned))
+                    if (list.isEmpty() && cleaned.isNotBlank()) {
+                        val snippet = cleaned.take(160).replace("\n", " ").trim()
+                        return@use Result.failure(IllegalStateException("Invalid AI response: $snippet"))
+                    }
                     Result.success(list)
                 }
             } catch (e: Exception) {
@@ -108,18 +112,12 @@ class AiRecommender(private val apiKey: String) {
 
     private fun extractStringArray(element: JsonElement): List<String> {
         return when (element) {
-            is JsonArray -> element.mapNotNull { it.jsonPrimitiveOrNull() }.map { it.content }
-            is JsonPrimitive -> {
-                element.content.split("\n", ",")
-                    .map { it.trim().trim('"') }
-                    .filter { it.isNotBlank() }
-            }
+            is JsonArray -> element.mapNotNull { extractTitleFromElement(it) }
+            is JsonObject -> extractFromObject(element)
+            is JsonPrimitive -> extractFromText(element.content)
             else -> emptyList()
         }
     }
-
-    private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
-        this as? JsonPrimitive
 
     private fun JsonObject.getJsonArray(key: String): JsonArray? =
         this[key] as? JsonArray
@@ -129,4 +127,59 @@ class AiRecommender(private val apiKey: String) {
 
     private fun JsonObject.getJsonPrimitive(key: String): JsonPrimitive? =
         this[key] as? JsonPrimitive
+
+    private fun extractFromObject(obj: JsonObject): List<String> {
+        val keys = listOf("movies", "titles", "recommendations", "results", "list")
+        for (key in keys) {
+            val value = obj[key]
+            if (value is JsonArray) {
+                return value.mapNotNull { extractTitleFromElement(it) }
+            }
+        }
+        val single = extractTitleFromElement(obj)
+        return if (single != null) listOf(single) else emptyList()
+    }
+
+    private fun extractTitleFromElement(element: JsonElement): String? {
+        return when (element) {
+            is JsonPrimitive -> element.content.takeIf { it.isNotBlank() }
+            is JsonObject -> {
+                val title = element.getJsonPrimitive("title")?.content
+                val name = element.getJsonPrimitive("name")?.content
+                val movie = element.getJsonPrimitive("movie")?.content
+                val value = element.getJsonPrimitive("value")?.content
+                listOf(title, name, movie, value).firstOrNull { !it.isNullOrBlank() }
+            }
+            else -> null
+        }
+    }
+
+    private fun extractFromText(text: String): List<String> {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return emptyList()
+        if ((trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+            (trimmed.startsWith("{") && trimmed.endsWith("}"))
+        ) {
+            val reparsed = runCatching { json.parseToJsonElement(trimmed) }.getOrNull()
+            if (reparsed != null && reparsed != JsonPrimitive(trimmed)) {
+                val parsedList = extractStringArray(reparsed)
+                if (parsedList.isNotEmpty()) return parsedList
+            }
+        }
+        val lines = trimmed.split("\n")
+        val items = mutableListOf<String>()
+        for (line in lines) {
+            var item = line.trim()
+            if (item.startsWith("-") || item.startsWith("*")) {
+                item = item.drop(1).trim()
+            }
+            item = item.replace(Regex("^\\d+\\.?\\s*"), "").trim()
+            item = item.trim().trim(',').trim('"')
+            if (item.isNotBlank()) items.add(item)
+        }
+        if (items.isNotEmpty()) return items
+        return trimmed.split(",")
+            .map { it.trim().trim('"') }
+            .filter { it.isNotBlank() }
+    }
 }

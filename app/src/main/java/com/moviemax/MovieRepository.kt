@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -17,6 +19,10 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
+import java.net.URLEncoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 const val APP_VERSION = "1.0-mobile"
 
@@ -37,6 +43,10 @@ const val DB_URL =
     "https://github.com/alamin-sarkar/test/raw/refs/heads/main/test/movie_database.zip"
 const val DB_VERSION_URL =
     "https://raw.githubusercontent.com/alamin-sarkar/test/refs/heads/main/test/db_version.txt"
+const val APP_VERSION_URL =
+    "https://raw.githubusercontent.com/abdullahal-baki/movie-max/refs/heads/main/version-mobile.txt"
+const val APP_RELEASES_URL =
+    "https://github.com/abdullahal-baki/movie-max/releases"
 
 data class MovieResult(
     val title: String,
@@ -54,7 +64,9 @@ data class HistoryEntry(
     val position: Long,
     val duration: Long,
     val lastPlayedTs: Long,
+    val baseName: String? = null,
     val posterLink: String? = null,
+    val localPosterPath: String? = null,
     val audioLabel: String? = null,
     val audioLanguage: String? = null,
     val audioGroupIndex: Int? = null,
@@ -67,11 +79,28 @@ data class HistoryEntry(
     val subtitleUri: String? = null
 )
 
+@Serializable
+data class AiCacheItem(
+    val title: String,
+    val link: String,
+    val posterLink: String? = null,
+    val baseName: String
+)
+
+@Serializable
+data class AiCache(
+    val timestamp: Long,
+    val items: List<AiCacheItem>
+)
+
 class MovieRepository(private val app: Application) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val dbFile = File(app.filesDir, "movie_database.db")
     private val historyFile = File(app.filesDir, "history.json")
     private val versionFile = File(app.filesDir, "db_version.txt")
+    private val posterCacheFile = File(app.filesDir, "posters_cache.json")
+    private val aiCacheFile = File(app.filesDir, "ai_recommendations.json")
+    private val posterDir = File(app.filesDir, "poster_cache")
 
     private val headClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
@@ -93,7 +122,62 @@ class MovieRepository(private val app: Application) {
         .callTimeout(8, TimeUnit.SECONDS)
         .build()
 
+    private val omdbClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    private val posterClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .build()
+
     fun dbReady(): Boolean = dbFile.exists()
+
+    private fun posterFileForKey(key: String): File {
+        if (!posterDir.exists()) posterDir.mkdirs()
+        val safe = key.lowercase()
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+        return File(posterDir, "$safe.jpg")
+    }
+
+    fun getLocalPosterPath(key: String): String? {
+        if (key.isBlank()) return null
+        val file = posterFileForKey(key)
+        return if (file.exists()) file.absolutePath else null
+    }
+
+    suspend fun downloadPosterToFile(url: String, key: String): String? = withContext(Dispatchers.IO) {
+        if (url.isBlank() || key.isBlank()) return@withContext null
+        if (url.startsWith("file://")) return@withContext url
+        val file = posterFileForKey(key)
+        val temp = File(file.parentFile, "${file.name}.tmp")
+        try {
+            val request = Request.Builder().url(url).get().build()
+            posterClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body ?: return@withContext null
+                temp.outputStream().use { out ->
+                    body.byteStream().use { input ->
+                        input.copyTo(out)
+                    }
+                }
+            }
+            if (temp.exists() && temp.length() > 0) {
+                if (file.exists()) file.delete()
+                temp.renameTo(file)
+                return@withContext file.absolutePath
+            }
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            if (temp.exists()) temp.delete()
+        }
+    }
 
     fun getLocalDbVersion(): String? {
         if (!versionFile.exists()) return null
@@ -323,6 +407,57 @@ class MovieRepository(private val app: Application) {
         }
     }
 
+    fun loadPosterCache(): Map<String, String> {
+        if (!posterCacheFile.exists()) return emptyMap()
+        return try {
+            val text = posterCacheFile.readText(Charsets.UTF_8)
+            json.decodeFromString(
+                MapSerializer(String.serializer(), String.serializer()),
+                text
+            )
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun savePosterCache(cache: Map<String, String>) {
+        try {
+            val filtered = cache.filterValues { it.isNotBlank() }
+            if (filtered.isEmpty()) {
+                if (posterCacheFile.exists()) posterCacheFile.delete()
+                return
+            }
+            val text = json.encodeToString(
+                MapSerializer(String.serializer(), String.serializer()),
+                filtered
+            )
+            posterCacheFile.writeText(text, Charsets.UTF_8)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun loadAiCache(): AiCache? {
+        if (!aiCacheFile.exists()) return null
+        return try {
+            val text = aiCacheFile.readText(Charsets.UTF_8)
+            json.decodeFromString(AiCache.serializer(), text)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveAiCache(cache: AiCache?) {
+        try {
+            if (cache == null || cache.items.isEmpty()) {
+                if (aiCacheFile.exists()) aiCacheFile.delete()
+                return
+            }
+            val text = json.encodeToString(AiCache.serializer(), cache)
+            aiCacheFile.writeText(text, Charsets.UTF_8)
+        } catch (_: Exception) {
+        }
+    }
+
     fun openExternal(link: String): Boolean {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(Uri.parse(link), "video/*")
@@ -341,5 +476,65 @@ class MovieRepository(private val app: Application) {
             if (link.contains(server)) return true
         }
         return false
+    }
+
+    suspend fun fetchOmdbPoster(title: String, apiKey: String): String? = withContext(Dispatchers.IO) {
+        if (title.isBlank() || apiKey.isBlank()) return@withContext null
+        try {
+            val query = URLEncoder.encode(title, "UTF-8")
+            val url = "https://www.omdbapi.com/?apikey=$apiKey&s=$query&type=movie"
+            val request = Request.Builder().url(url).get().build()
+            omdbClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body?.string().orEmpty()
+                val root = (json.parseToJsonElement(body) as? JsonObject) ?: return@withContext null
+                val ok = (root["Response"] as? JsonPrimitive)?.content ?: "False"
+                if (ok != "True") return@withContext null
+                val search = root["Search"] as? JsonArray ?: return@withContext null
+                for (item in search) {
+                    val obj = item as? JsonObject ?: continue
+                    val poster = (obj["Poster"] as? JsonPrimitive)?.content
+                    if (!poster.isNullOrBlank() && poster != "N/A") {
+                        return@withContext poster
+                    }
+                }
+            }
+            val exactUrl = "https://www.omdbapi.com/?apikey=$apiKey&t=$query&type=movie"
+            val exactRequest = Request.Builder().url(exactUrl).get().build()
+            omdbClient.newCall(exactRequest).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body?.string().orEmpty()
+                val root = (json.parseToJsonElement(body) as? JsonObject) ?: return@withContext null
+                val ok = (root["Response"] as? JsonPrimitive)?.content ?: "False"
+                if (ok != "True") return@withContext null
+                val poster = (root["Poster"] as? JsonPrimitive)?.content
+                if (poster.isNullOrBlank() || poster == "N/A") null else poster
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun findPosterByBaseName(baseName: String): String? = withContext(Dispatchers.IO) {
+        val name = baseName.trim()
+        if (name.isBlank()) return@withContext null
+        if (!dbFile.exists()) return@withContext null
+        val db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+        try {
+            db.rawQuery(
+                "SELECT poster_link FROM Movies WHERE name = ? COLLATE NOCASE AND poster_link IS NOT NULL AND poster_link != '' LIMIT 1",
+                arrayOf(name)
+            ).use { cursor ->
+                return@withContext if (cursor.moveToFirst()) {
+                    cursor.getString(0)
+                } else {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            db.close()
+        }
     }
 }

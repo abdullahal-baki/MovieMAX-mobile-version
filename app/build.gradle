@@ -10,6 +10,8 @@ if (localPropsFile.exists()) {
     localPropsFile.withInputStream { localProps.load(it) }
 }
 def geminiKey = localProps.getProperty("GEMINI_API_KEY", "")
+def groqKey = localProps.getProperty("GROQ_API_KEY", "")
+def omdbKey = localProps.getProperty("OMDB_API_KEY", "")
 
 android {
     namespace 'com.moviemax'
@@ -23,6 +25,8 @@ android {
         versionName '1.0'
 
         buildConfigField "String", "GEMINI_API_KEY", "\"${geminiKey}\""
+        buildConfigField "String", "GROQ_API_KEY", "\"${groqKey}\""
+        buildConfigField "String", "OMDB_API_KEY", "\"${omdbKey}\""
     }
 
     buildTypes {

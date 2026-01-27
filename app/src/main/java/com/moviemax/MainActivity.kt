@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -185,14 +186,48 @@ class MainActivity : ComponentActivity() {
                             onYearChange = viewModel::onYearChange,
                             onSearch = viewModel::startSearch,
                             onTabSelected = viewModel::onTabSelected,
-                            onResultClick = { viewModel.openResult(it.link, it.title, it.posterLink) },
-                            onHistoryClick = { viewModel.openHistory(it.link, it.title, it.posterLink) },
+                            onResultClick = { viewModel.openResult(it.link, it.title, it.posterLink, it.baseName) },
+                            onHistoryClick = { viewModel.openHistory(it.link, it.title, it.posterLink, it.baseName) },
                             onMenuClick = { drawerScope.launch { drawerState.open() } },
                             onClearHistory = viewModel::clearHistory,
                             onRemoveHistoryItem = viewModel::removeHistoryItem,
-                            onRefreshAi = viewModel::refreshAiNow
+                            onRefreshAi = viewModel::refreshAiNow,
+                            onRefreshHistory = viewModel::refreshHistoryPostersNow,
+                            onDiscoverViewed = viewModel::onDiscoverViewed
                         )
                     }
+                }
+
+                if (state.updateAvailable && state.updateVersion != null) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissUpdate() },
+                        title = { Text("New version available") },
+                        text = {
+                            Text(
+                                text = "Version ${state.updateVersion} is available. Visit releases page to update.",
+                                color = Color(0xFFE7ECF2)
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                        data = android.net.Uri.parse(APP_RELEASES_URL)
+                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    startActivity(intent)
+                                    viewModel.dismissUpdate()
+                                }
+                            ) {
+                                Text("Open Release Page")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.dismissUpdate() }) {
+                                Text("Later")
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -231,7 +266,9 @@ fun MovieMaxScreen(
     onMenuClick: () -> Unit,
     onClearHistory: () -> Unit,
     onRemoveHistoryItem: (String) -> Unit,
-    onRefreshAi: () -> Unit
+    onRefreshAi: () -> Unit,
+    onRefreshHistory: () -> Unit,
+    onDiscoverViewed: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -364,7 +401,7 @@ fun MovieMaxScreen(
                 Tab(
                     selected = state.selectedTab == MainTab.Results,
                     onClick = { onTabSelected(MainTab.Results) },
-                    text = { Text("Results") }
+                    text = { Text("Discover") }
                 )
                 Tab(
                     selected = state.selectedTab == MainTab.History,
@@ -402,10 +439,25 @@ fun MovieMaxScreen(
             ) {
                 when (state.selectedTab) {
                     MainTab.Results -> {
-                        val showAi = state.results.isEmpty() && state.aiResults.isNotEmpty()
-                        val showAiHint = state.results.isEmpty() && state.aiResults.isEmpty() && state.history.isEmpty()
+                        LaunchedEffect(state.selectedTab, state.aiResults.size, state.history.size) {
+                            onDiscoverViewed()
+                        }
+                        val showAi = state.results.isEmpty() && state.aiResults.isNotEmpty() && state.history.isNotEmpty()
+                        val showAiHint = state.results.isEmpty() && state.aiResults.isEmpty() && state.history.isNotEmpty()
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (showAi) {
+                            if (state.isSearching) {
+                                Text(
+                                    text = "Searching...",
+                                    color = Color(0xFF7EE8C3),
+                                    fontSize = 12.sp
+                                )
+                            } else if (state.results.isNotEmpty()) {
+                                Text(
+                                    text = "Search results",
+                                    color = Color(0xFF7EE8C3),
+                                    fontSize = 12.sp
+                                )
+                            } else if (showAi) {
                                 Text(
                                     text = "AI recommended movies",
                                     color = Color(0xFF7EE8C3),
@@ -414,19 +466,39 @@ fun MovieMaxScreen(
                             }
                             if (showAiHint) {
                                 Text(
+                                    text = "Swipe down to get AI recommendation movies.",
+                                    color = Color(0xFF9AA6B2),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (state.discoverStatus.isNotBlank() && !state.isSearching && state.results.isEmpty()) {
+                                Text(
+                                    text = state.discoverStatus,
+                                    color = Color(0xFF9AA6B2),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (state.results.isEmpty() && state.history.isEmpty()) {
+                                Text(
                                     text = "Watch some movies to get AI recommendations.",
                                     color = Color(0xFF9AA6B2),
                                     fontSize = 12.sp
                                 )
                             }
-                            if (state.results.isEmpty() && state.aiStatus.isNotBlank()) {
+                            if (state.aiStale && state.aiResults.isNotEmpty()) {
                                 Text(
-                                    text = state.aiStatus,
+                                    text = "AI list is old. Swipe down to refresh.",
                                     color = Color(0xFF9AA6B2),
                                     fontSize = 12.sp
                                 )
                             }
-                            val canPull = state.results.isEmpty()
+                            if (state.aiRefreshing) {
+                                Text(
+                                    text = "AI recommendations loading...",
+                                    color = Color(0xFF9AA6B2),
+                                    fontSize = 12.sp
+                                )
+                            }
                             val pullState = rememberPullRefreshState(
                                 refreshing = state.aiRefreshing,
                                 onRefresh = onRefreshAi
@@ -434,25 +506,31 @@ fun MovieMaxScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .then(if (canPull) Modifier.pullRefresh(pullState) else Modifier)
+                                    .pullRefresh(pullState)
                             ) {
                                 ResultList(
                                     items = if (showAi) state.aiResults else state.results,
                                     onItemClick = onResultClick
                                 )
-                                if (canPull) {
-                                    PullRefreshIndicator(
-                                        refreshing = state.aiRefreshing,
-                                        state = pullState,
-                                        modifier = Modifier.align(Alignment.TopCenter),
-                                        contentColor = Color(0xFFF2C14E)
-                                    )
-                                }
+                                PullRefreshIndicator(
+                                    refreshing = state.aiRefreshing,
+                                    state = pullState,
+                                    modifier = Modifier.align(Alignment.TopCenter),
+                                    contentColor = Color(0xFFF2C14E)
+                                )
                             }
                         }
                     }
                     MainTab.History -> {
-                        Box(modifier = Modifier.fillMaxSize()) {
+                        val pullState = rememberPullRefreshState(
+                            refreshing = state.historyRefreshing,
+                            onRefresh = onRefreshHistory
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pullRefresh(pullState)
+                        ) {
                             HistoryList(
                                 items = state.history,
                                 availableServers = state.availableServers,
@@ -467,13 +545,19 @@ fun MovieMaxScreen(
                                         .padding(8.dp)
                                 )
                             }
+                            PullRefreshIndicator(
+                                refreshing = state.historyRefreshing,
+                                state = pullState,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                                contentColor = Color(0xFFF2C14E)
+                            )
                         }
                     }
                 }
             }
 
             Text(
-                text = state.actionStatus,
+                text = if (state.isSearching) "" else state.actionStatus,
                 color = Color(0xFF7EE8C3),
                 fontSize = 11.sp,
                 modifier = Modifier.height(18.dp)
@@ -554,27 +638,30 @@ fun AppDrawer(appVersion: String, dbVersion: String?) {
         Column(
             modifier = Modifier
                 .widthIn(max = 300.dp)
+                .fillMaxHeight()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = Color(0xFFF2C14E)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "About App",
-                    color = Color(0xFFF2C14E),
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            DrawerSectionTitle("About")
             Text(text = "MovieMAX - BDIX cinema hub")
-            Text(text = "Developed by: Abdullah Al Baki")
-            Text(text = "Version: v2.0 mobile")
+            Text(text = "Developed by: Bakisofts Lab")
+            Text(text = "Developer: Abdullah Al Baki")
+            Text(text = "App Version: $appVersion")
             Text(text = "DB Version: ${dbVersion ?: "Unknown"}")
-            Text(text = "VLC Media Player recommended for streaming.")
+
+            DrawerSectionTitle("Help")
+            Text(
+                text = "• Connect servers first. If no server is connected, search will be disabled.\n" +
+                    "• Search by movie name (optional year filter) to get results.\n" +
+                    "• Discover tab shows AI recommendations. Swipe down to refresh.\n" +
+                    "• If history is empty, AI suggestions will not appear.\n" +
+                    "• Database updates automatically when a new DB is available.\n" +
+                    "• Use the internal player for resume, tracks and subtitle controls.",
+                fontSize = 12.sp,
+                color = Color(0xFFB5BEC9)
+            )
+
+            DrawerSectionTitle("External Links")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -592,7 +679,32 @@ fun AppDrawer(appVersion: String, dbVersion: String?) {
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "MovieMAX v$appVersion",
+                fontSize = 11.sp,
+                color = Color(0xFF6D7785)
+            )
         }
+    }
+}
+
+@Composable
+fun DrawerSectionTitle(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = Color(0xFFF2C14E),
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            color = Color(0xFFF2C14E),
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -628,9 +740,17 @@ fun LinkButton(
 
 @Composable
 fun ResultList(items: List<ResultItem>, onItemClick: (ResultItem) -> Unit) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(items) { item ->
-            ResultRow(item = item, onClick = { onItemClick(item) })
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 120.dp)
+    ) {
+        if (items.isEmpty()) {
+            item { Spacer(modifier = Modifier.height(400.dp)) }
+        } else {
+            items(items) { item ->
+                ResultRow(item = item, onClick = { onItemClick(item) })
+            }
         }
     }
 }
