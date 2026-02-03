@@ -1,15 +1,19 @@
-__pycache__/db_loader.cpython-312.pyc
-__pycache__/
+##############################
+# Local / personal files
+##############################
 notes.txt
-dist/
-build/
-BDIX
-__pycache__/db.cpython-312.pyc
-__pycache__/db.cpython-312.pyc
-*.spec
+.env
+.env.*
+
+##############################
+# Python (if used)
+##############################
+__pycache__/
 *.pyc
-venv
+venv/
+dist/
 dist_installer/
+*.spec
 
 
 # Gradle
@@ -32,6 +36,14 @@ out/
 *.ap_
 *.aab
 *.dex
+
+# Signing files
+*.jks
+*.keystore
+keystore.properties
+
+# Google services
+google-services.json
 
 # NDK / CMake
 .externalNativeBuild/

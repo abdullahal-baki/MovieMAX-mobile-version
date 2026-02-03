@@ -81,6 +81,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
@@ -94,6 +95,7 @@ import kotlin.math.roundToInt
 
 private enum class DragMode { None, Seek, Volume, Brightness }
 
+@UnstableApi
 @Composable
 fun InternalPlayerScreen(
     url: String,

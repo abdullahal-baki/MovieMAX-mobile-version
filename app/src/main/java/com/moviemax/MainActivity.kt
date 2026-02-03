@@ -104,9 +104,11 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
+@UnstableApi
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -211,11 +213,13 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             TextButton(
                                 onClick = {
-                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                        data = android.net.Uri.parse(APP_RELEASES_URL)
-                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    if (APP_RELEASES_URL.isNotBlank()) {
+                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                            data = android.net.Uri.parse(APP_RELEASES_URL)
+                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        startActivity(intent)
                                     }
-                                    startActivity(intent)
                                     viewModel.dismissUpdate()
                                 }
                             ) {

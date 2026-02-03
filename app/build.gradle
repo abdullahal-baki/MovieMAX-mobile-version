@@ -9,9 +9,22 @@ def localPropsFile = rootProject.file("local.properties")
 if (localPropsFile.exists()) {
     localPropsFile.withInputStream { localProps.load(it) }
 }
+def esc = { String s ->
+    if (s == null) return ""
+    return s
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "")
+            .replace("\n", "\\n")
+}
 def geminiKey = localProps.getProperty("GEMINI_API_KEY", "")
 def groqKey = localProps.getProperty("GROQ_API_KEY", "")
 def omdbKey = localProps.getProperty("OMDB_API_KEY", "")
+def serverList = localProps.getProperty("MOVIEMAX_SERVER_LIST", "")
+def dbUrl = localProps.getProperty("MOVIEMAX_DB_URL", "")
+def dbVersionUrl = localProps.getProperty("MOVIEMAX_DB_VERSION_URL", "")
+def appVersionUrl = localProps.getProperty("MOVIEMAX_APP_VERSION_URL", "")
+def appReleasesUrl = localProps.getProperty("MOVIEMAX_APP_RELEASES_URL", "")
 
 android {
     namespace 'com.moviemax'
@@ -22,11 +35,17 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 1
-        versionName '1.0'
+        versionName '1.0.0'
 
-        buildConfigField "String", "GEMINI_API_KEY", "\"${geminiKey}\""
-        buildConfigField "String", "GROQ_API_KEY", "\"${groqKey}\""
-        buildConfigField "String", "OMDB_API_KEY", "\"${omdbKey}\""
+        buildConfigField "String", "GEMINI_API_KEY", "\"${esc(geminiKey)}\""
+        buildConfigField "String", "GROQ_API_KEY", "\"${esc(groqKey)}\""
+        buildConfigField "String", "OMDB_API_KEY", "\"${esc(omdbKey)}\""
+
+        buildConfigField "String", "MOVIEMAX_SERVER_LIST", "\"${esc(serverList)}\""
+        buildConfigField "String", "MOVIEMAX_DB_URL", "\"${esc(dbUrl)}\""
+        buildConfigField "String", "MOVIEMAX_DB_VERSION_URL", "\"${esc(dbVersionUrl)}\""
+        buildConfigField "String", "MOVIEMAX_APP_VERSION_URL", "\"${esc(appVersionUrl)}\""
+        buildConfigField "String", "MOVIEMAX_APP_RELEASES_URL", "\"${esc(appReleasesUrl)}\""
     }
 
     buildTypes {
