@@ -28,14 +28,11 @@ MovieMAX is an Android app built with Kotlin + Jetpack Compose for searching and
 
 ### Configure `local.properties`
 
-This repo is public-friendly: server URLs, DB endpoints, and API keys are **not** committed.
+This repo uses `local.properties` for local machine setup and optional API keys.
 
 1. Copy `local.properties.example` → `local.properties`
 2. Fill in at least:
    - `sdk.dir=...`
-   - `MOVIEMAX_SERVER_LIST=...`
-   - `MOVIEMAX_DB_URL=...`
-   - `MOVIEMAX_DB_VERSION_URL=...`
 3. Optional integrations:
    - `GROQ_API_KEY=...`
    - `OMDB_API_KEY=...`

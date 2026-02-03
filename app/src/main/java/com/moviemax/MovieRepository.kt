@@ -26,17 +26,27 @@ import kotlinx.serialization.json.JsonPrimitive
 
 const val APP_VERSION = "1.0.0-mobile"
 
-private fun parseServerList(raw: String): List<String> =
-    raw.split("\n", ",", ";")
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
+val SERVER_LIST = listOf(
+    "45.250.20.254",
+    "172.16.50.7",
+    "10.16.100.213",
+    "10.100.100.12",
+    "10.16.100.202",
+    "10.16.100.212",
+    "10.16.100.206",
+    "103.153.175.254/NAS1",
+    "server1.dhakamovie.com/",
+    "data.kenecolor.com/data/",
+)
 
-val SERVER_LIST: List<String> = parseServerList(BuildConfig.MOVIEMAX_SERVER_LIST)
-
-val DB_URL: String = BuildConfig.MOVIEMAX_DB_URL.trim()
-val DB_VERSION_URL: String = BuildConfig.MOVIEMAX_DB_VERSION_URL.trim()
-val APP_VERSION_URL: String = BuildConfig.MOVIEMAX_APP_VERSION_URL.trim()
-val APP_RELEASES_URL: String = BuildConfig.MOVIEMAX_APP_RELEASES_URL.trim()
+const val DB_URL =
+    "https://github.com/alamin-sarkar/test/raw/refs/heads/main/test/movie_database.zip"
+const val DB_VERSION_URL =
+    "https://raw.githubusercontent.com/alamin-sarkar/test/refs/heads/main/test/db_version.txt"
+const val APP_VERSION_URL =
+    "https://raw.githubusercontent.com/abdullahal-baki/movie-max/refs/heads/main/version-mobile.txt"
+const val APP_RELEASES_URL =
+    "https://github.com/abdullahal-baki/movie-max/releases"
 
 data class MovieResult(
     val title: String,

@@ -96,7 +96,6 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun checkAppUpdate() {
         viewModelScope.launch(Dispatchers.IO) {
-            if (APP_VERSION_URL.isBlank()) return@launch
             val remote = repo.fetchRemoteDbVersion(APP_VERSION_URL).getOrNull()?.trim()
             if (remote.isNullOrBlank()) return@launch
             val local = parseVersion(APP_VERSION)
@@ -380,11 +379,6 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun ensureDb() {
         viewModelScope.launch {
-            if (DB_URL.isBlank() || DB_VERSION_URL.isBlank()) {
-                _uiState.update { it.copy(dbReady = false) }
-                setStatus("Database source not configured. See README.md for setup.")
-                return@launch
-            }
             if (!repo.dbReady()) {
                 val progress = createProgressUpdater("Downloading database...")
                 setStatus("Downloading database...", autoClear = false)
@@ -437,18 +431,6 @@ class MovieMaxViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun checkServers() {
         viewModelScope.launch {
-            if (SERVER_LIST.isEmpty()) {
-                availableServers = emptyList()
-                _uiState.update {
-                    it.copy(
-                        canSearch = false,
-                        serverStatus = "No servers configured. Set MOVIEMAX_SERVER_LIST in local.properties.",
-                        availableServers = emptySet(),
-                        serverChecking = false
-                    )
-                }
-                return@launch
-            }
             val total = SERVER_LIST.size
             val available = mutableListOf<String>()
             _uiState.update { it.copy(serverChecking = true, serverStatus = "Checking servers...") }

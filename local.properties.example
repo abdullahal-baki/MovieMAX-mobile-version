@@ -11,16 +11,3 @@ sdk.dir=
 GEMINI_API_KEY=
 GROQ_API_KEY=
 OMDB_API_KEY=
-
-# App configuration (recommended for public repos)
-# Comma, semicolon, or newline separated list of servers (example):
-# MOVIEMAX_SERVER_LIST=example.com,192.0.2.1
-MOVIEMAX_SERVER_LIST=
-
-# Database download + version URLs (host your own)
-MOVIEMAX_DB_URL=
-MOVIEMAX_DB_VERSION_URL=
-
-# Optional: update checker + releases URL
-MOVIEMAX_APP_VERSION_URL=
-MOVIEMAX_APP_RELEASES_URL=
